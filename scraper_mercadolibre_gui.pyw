@@ -25,6 +25,8 @@ import json
 from datetime import datetime
 #log
 import logging
+# gc
+import gc
 
 # Clases
 
@@ -157,6 +159,14 @@ class scraping_ml_gui:
         ### Solo para testing
         #self.insert_test_values()
 
+        ### Creacion de directorios si no existen
+        self.path_output_file = os.path.join(os.path.dirname(sys.argv[0]), "output")
+        self.path_log_file = os.path.join(os.path.dirname(sys.argv[0]), "log")
+        if not os.path.exists(self.path_output_file):
+            os.makedirs(self.path_output_file)
+        if not os.path.exists(self.path_log_file):
+            os.makedirs(self.path_log_file)
+        
         ### Start
         self.root.mainloop()
 
@@ -200,6 +210,8 @@ class scraping_ml_gui:
             with open(os.path.join(os.path.dirname(sys.argv[0]), "log", f"lista_ejecuciones_{date_now}.json"), "w") as json_file:
                 json.dump(json_list, json_file)
             tkinter.messagebox.showinfo("Exportar Lista", "Se exportaron las ejecuciones correctamente en el archivo " + os.path.join(os.path.dirname(sys.argv[0]), "log", f"lista_ejecuciones_{date_now}.json"))
+            # Elimino de memoria lo exportado
+            del json_list[:]
         except Exception as err:
             messagebox.showerror("Error", f"Error al exportar la lista: {err}")
             return
@@ -306,6 +318,80 @@ class scraping_ml_gui:
 
     # Scraping a ml
     def scraping_ml(self, url, scraping_product, pages, filename, logger_info):
+        # Scraping product details
+        def scraping_product_details(product_soup, date_now):
+            # Diccionario de informacion del producto
+            product_dict = {
+                "fecha_hora" : date_now,
+                "producto": "",
+                "precio": "0",
+                "moneda" : "ARS",
+                "url_producto": "",
+                "url_img_producto" : "",
+                "reviews": "0",
+                "id_publicacion": "NULL",
+                "estado": "Desconocido",
+                "vendidos": "0"
+            }
+            ### Busqueda en la pagina de productos
+            # Titulo
+            title_product = product_soup.find('h2', 'ui-search-item__title').string
+            product_dict["producto"] = "\"" + title_product + "\""
+            # Url
+            url_product = product_soup.find("a", "ui-search-link").get("href")
+            product_dict["url_producto"] = url_product
+            logger_info.info(f"Scrapeando producto actual de la pagina {url_product}")
+            # Imagen
+            img_product = product_soup.find('img','ui-search-result-image__element')
+            product_dict["url_img_producto"] = img_product.get('data-src')
+            ### Busqueda en el link individual
+            try:
+                product_soup_details = BeautifulSoup(requests.get(url_product).text,'html.parser')
+            except requests.RequestException as err:
+                #self.update_progress(scraping_product, "error", err)
+                #tkinter.messagebox.showerror(f"ERROR {scraping_product}", f"Error al intentar buscar el siguiente producto ({url_product}), la pagina no responde a la peticion")
+                logger_info.error(f"Error al intentar buscar el siguiente producto ({url_product}), la pagina no responde a la peticion")
+                logger_info.error(f"Error obtenido: {str(err)}")
+                return
+            # Reviews
+            try:
+                reviews = product_soup_details.find('span','ui-pdp-review__amount').string
+                reviews = reviews.split(" ")[0]
+                if reviews == "":
+                    reviews = "0"
+                product_dict["reviews"] = reviews
+            except:
+                logger_info.info(f"No se encontraron reviews para {url_product}, se dejara en 0")
+                product_dict["reviews"] = "0"
+            # Id Publicacion
+            try:
+                id_publish = product_soup_details.findAll('span','ui-pdp-color--BLACK ui-pdp-family--SEMIBOLD')[-1].string
+                product_dict["id_publicacion"] = id_publish
+            except:
+                logger_info.info(f"No se logro encontrar ID de publicacion para {url_product}, se dejara en NULL")
+                product_dict["id_publicacion"] = "NULL"
+            # Unidades Vendidas / Estado
+            try:
+                subtext_status = product_soup_details.find("span", "ui-pdp-subtitle").string.split("|")
+                status = subtext_status[0].strip()
+                if len(subtext_status) == 2:
+                    count_selled = subtext_status[1].replace("vendido", "").replace("s", "").strip()
+                else:
+                    count_selled = "0"
+                product_dict["estado"] = status
+                product_dict["vendidos"] = count_selled
+            except:
+                pass
+            # Precio
+            try:
+                price = product_soup_details.find('span','price-tag-fraction').string.replace(".", "")
+                product_dict["precio"] = price
+            except:
+                logger_info.info(f"No se logro encontrar el precio para {url_product}, se dejara en 0")
+            # Fin de registro
+            products.append(product_dict)
+        # Scraping principal
+        self.write_header(filename, logger_info)
         count_products = 0
         self.scraping_process += 1
         products = []
@@ -323,85 +409,24 @@ class scraping_ml_gui:
                 return 1
             soup = BeautifulSoup(response.text,'html.parser')
             #title_url = soup.title.string
-            date_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            thread_list = []
             for product_soup in soup.find_all('li', 'ui-search-layout__item'):
-                # Diccionario de informacion del producto
-                product_dict = {
-                    "fecha_hora" : date_actual,
-                    "producto": "",
-                    "precio": "",
-                    "moneda" : "ARS",
-                    "url_producto": "",
-                    "url_img_producto" : "",
-                    "reviews": "",
-                    "id_publicacion": "",
-                    "estado": "",
-                    "vendidos": ""
-                }
-                ### Busqueda en la pagina de productos
-                # Titulo
-                title_product = product_soup.find('h2', 'ui-search-item__title').string
-                product_dict["producto"] = "\"" + title_product + "\""
-                # Url
-                url_product = product_soup.find("a", "ui-search-link").get("href")
-                product_dict["url_producto"] = url_product
-                logger_info.info(f"Scrapeando producto actual de la pagina {url_product}")
-                # Imagen
-                img_product = product_soup.find('img','ui-search-result-image__element')
-                product_dict["url_img_producto"] = img_product.get('data-src')
-                ### Busqueda en el link individual
-                try:
-                    product_soup_details = BeautifulSoup(requests.get(url_product).text,'html.parser')
-                except requests.RequestException as err:
-                    self.update_progress(scraping_product, "error", err)
-                    tkinter.messagebox.showerror(f"ERROR {scraping_product}", f"Error al intentar buscar el siguiente producto ({url_product}), la pagina no responde a la peticion")
-                    logger_info.error(f"Error al intentar buscar el siguiente producto ({url_product}), la pagina no responde a la peticion")
-                    if tkinter.messagebox.askyesno("Continuar", "¿Desea continuar con el scraping?"):
-                        continue
-                    else:
-                        error_code = 1
-                        self.scraping_process -= 1
-                        return 1
-                # Reviews
-                try:
-                    reviews = product_soup_details.find('span','ui-pdp-review__amount').string
-                    reviews = reviews.split(" ")[0]
-                    if reviews == "":
-                        reviews = "0"
-                    product_dict["reviews"] = reviews
-                except:
-                    logger_info.info("No se encontraron reviews, se dejara en 0")
-                    product_dict["reviews"] = "0"
-                # Id Publicacion
-                try:
-                    id_publish = product_soup_details.findAll('span','ui-pdp-color--BLACK ui-pdp-family--SEMIBOLD')[-1].string
-                    product_dict["id_publicacion"] = id_publish
-                except:
-                    logger_info.info("No se logro encontrar ID de publicacion, se dejara en NULL")
-                    product_dict["id_publicacion"] = "NULL"
-                # Unidades Vendidas / Estado
-                try:
-                    subtext_status = product_soup_details.find("span", "ui-pdp-subtitle").string.split("|")
-                    status = subtext_status[0].strip()
-                    if len(subtext_status) == 2:
-                        count_selled = subtext_status[1].replace("vendido", "").replace("s", "").strip()
-                    else:
-                        count_selled = "0"
-                    product_dict["estado"] = status
-                    product_dict["vendidos"] = count_selled
-                except:
-                    pass
-                # Precio
-                try:
-                    price = product_soup_details.find('span','price-tag-fraction').string.replace(".", "")
-                    product_dict["precio"] = price
-                except:
-                    logger_info.info("No se logro encontrar el precio, se dejara en -")
-                    product_dict["precio"] = "-"
-                # Fin de registro
-                products.append(product_dict)
+                # Threads
+                thread_scraping = threading.Thread(target=scraping_product_details, args=(product_soup, date_now))
+                thread_list.append(thread_scraping)
+                thread_scraping.start()
+            for thread in thread_list:
+                thread.join()
                 count_products += 1
                 self.update_progress(scraping_product, "new_element", None)
+            # Escritura de los productos encontrados
+            self.write_rows(filename, products, logger_info)
+            # Eliminar de la memoria lo ya usado
+            del products[:]
+            del thread_list[:]
+            gc.collect()
+            # Cambio de pagina
             try:
                 link_next = (soup.find('li','andes-pagination__button andes-pagination__button--next')).find('a','andes-pagination__link')
                 url = link_next.get('href')
@@ -421,12 +446,19 @@ class scraping_ml_gui:
         self.end_scraping(error_code, scraping_product, filename, products, logger_info)
         return 0
 
-    # Finalizacion de scraping y escritura en archivo
-    def end_scraping(self, error_code, scraping_product, filename, products, logger_info):
-        logger_info.info(f"Se guardaran los productos encontrados en el archivo {filename}")
+    # Escritura del header
+    def write_header(self, filename, logger_info):
+        logger_info.info(f"Se armara el header del archivo {filename}")
         # Armado del Header en el archivo
         file = open(filename, "w", encoding="utf-8-sig")
         file.write("fecha_hora|producto|precio|moneda|url_producto|url_img_producto|reviews|id_publicacion|estado|vendidos\n")
+        file.close()
+    
+    # Escritura de archivos
+    def write_rows(self, filename, products, logger_info):
+        logger_info.info(f"Se guardaran los productos encontrados en el archivo {filename}")
+        # Armado del Header en el archivo
+        file = open(filename, "a", encoding="utf-8-sig")
         # Escritura de los datos
         for product in products:
             file.write(product["fecha_hora"] + "|")
@@ -440,6 +472,9 @@ class scraping_ml_gui:
             file.write(product["estado"] + "|")
             file.write(product["vendidos"] + "\n")
         file.close()
+
+    # Finalizacion de scraping
+    def end_scraping(self, error_code, scraping_product, filename, products, logger_info):
         if error_code == 0:
             self.update_progress(scraping_product, "finished", None)
             tkinter.messagebox.showinfo("Scraping completado", f"El scraping del producto {scraping_product} se ha completado.")
@@ -463,19 +498,21 @@ class view_file_ml:
         # Treeview
         self.lista_productos = ttk.Treeview(self.root, columns=self.columns, show="headings")
         self.refresh_button = tkinter.Button(self.root, text="Refresh", command=self.load_treeview)
-        self.quit_button = tkinter.Button(self.root, text="Quit", command=print)
+        self.quit_button = tkinter.Button(self.root, text="Quit", command=lambda : self.exit_question())
         # Carga configuracion
         self.config_root()
         self.load_treeview()
         self.load_styles()
         self.load_scroll_bars()
         self.load_binds()
+        ### Protocolos
+        self.root.protocol("WM_DELETE_WINDOW", self.exit_question)
         # Ejecucion
         self.root.mainloop()
 
     # Salida del programa
-    def salida_question(self):
-        valor = tkinter.messagebox.askokcancel("Salir", "¿Desea salir del view?")
+    def exit_question(self):
+        valor = tkinter.messagebox.askokcancel("Salir", "¿Desea salir del vusalizador de archivos?")
         if(valor):
             self.root.destroy()
 

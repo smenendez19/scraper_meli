@@ -28,6 +28,73 @@ def start_log(filename_log_debug, filename_log_info):
 	logger_info.addHandler(filehandler_info)
 	return logger_info
 
+# Scraping product details
+def scraping_product_details(product_soup):
+	date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+	# Diccionario de informacion del producto
+	product_dict = {
+		"fecha_hora" : date_now,
+		"producto": "",
+		"precio": "",
+		"moneda" : "ARS",
+		"url_producto": "",
+		"url_img_producto" : "",
+		"reviews": "",
+		"id_publicacion": "",
+		"estado": "",
+		"vendidos": ""
+	}
+	### Busqueda en la pagina de productos
+	# Titulo
+	title_product = product_soup.find('h2','ui-search-item__title').string
+	product_dict["producto"] = "\"" + title_product + "\""
+	# Url
+	url_product = product_soup.find("a", "ui-search-link").get("href")
+	product_dict["url_producto"] = url_product
+	logger_info.info(f"Scrapeando producto actual de la pagina {url_product}")
+	# Imagen
+	img_product = product_soup.find('img','ui-search-result-image__element')
+	product_dict["url_img_producto"] = img_product.get('data-src')
+	### Busqueda en el link individual
+	product_soup_details = BeautifulSoup(requests.get(url_product).text,'html.parser')
+	# Reviews
+	try:
+		reviews = product_soup_details.find('span','ui-pdp-review__amount').string
+		reviews = reviews.split(" ")[0]
+		if reviews == "":
+			reviews = "0"
+		product_dict["reviews"] = reviews
+	except:
+		product_dict["reviews"] = "0"
+	# Id Publicacion
+	try:
+		id_publish = product_soup_details.findAll('span','ui-pdp-color--BLACK ui-pdp-family--SEMIBOLD')[-1].string
+		product_dict["id_publicacion"] = id_publish
+	except:
+		pass
+	# Unidades Vendidas / Estado
+	try:
+		subtext_status = product_soup_details.find("span", "ui-pdp-subtitle").string.split("|")
+		status = subtext_status[0].strip()
+		if len(subtext_status) == 2:
+			count_selled = subtext_status[1].replace("vendido", "").replace("s", "").strip()
+		else:
+			count_selled = "0"
+		product_dict["estado"] = status
+		product_dict["vendidos"] = count_selled
+	except:
+		pass
+	# Precio
+	try:
+		price = product_soup_details.find('span','price-tag-fraction').string.replace(".", "")
+		product_dict["precio"] = price
+	except:
+		logger_info.info("No se logro encontrar el precio, se dejara en -")
+		product_dict["precio"] = "-"
+	# Fin de registro
+	products.append(product_dict)
+
+
 # Fecha de ejecucion
 date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -75,6 +142,7 @@ logger_info.info(f"Inicio del scraping en mercadolibre al producto {product_find
 print("Url: ", url)
 
 # Scraping meli
+# Global
 products = []
 for i in range(0, count_pages):
 	try:
@@ -89,69 +157,13 @@ for i in range(0, count_pages):
 		print (title_url + " | Pagina " + str(i+1))
 	except Exception as err:
 		print(err)
+	thread_list = []
 	for product_soup in soup.find_all('li','ui-search-layout__item'):
-		# Diccionario de informacion del producto
-		product_dict = {
-			"fecha_hora" : date_now,
-			"producto": "",
-			"precio": "",
-			"moneda" : "ARS",
-			"url_producto": "",
-			"url_img_producto" : "",
-			"reviews": "",
-			"id_publicacion": "",
-			"estado": "",
-			"vendidos": ""
-		}
-		### Busqueda en la pagina de productos
-		# Titulo
-		title_product = product_soup.find('h2','ui-search-item__title').string
-		product_dict["producto"] = "\"" + title_product + "\""
-		# Url
-		url_product = product_soup.find("a", "ui-search-link").get("href")
-		product_dict["url_producto"] = url_product
-		logger_info.info(f"Scrapeando producto actual de la pagina {url_product}")
-		# Imagen
-		img_product = product_soup.find('img','ui-search-result-image__element')
-		product_dict["url_img_producto"] = img_product.get('data-src')
-		### Busqueda en el link individual
-		product_soup_details = BeautifulSoup(requests.get(url_product).text,'html.parser')
-		# Reviews
-		try:
-			reviews = product_soup_details.find('span','ui-pdp-review__amount').string
-			reviews = reviews.split(" ")[0]
-			if reviews == "":
-				reviews = "0"
-			product_dict["reviews"] = reviews
-		except:
-			product_dict["reviews"] = "0"
-		# Id Publicacion
-		try:
-			id_publish = product_soup_details.findAll('span','ui-pdp-color--BLACK ui-pdp-family--SEMIBOLD')[-1].string
-			product_dict["id_publicacion"] = id_publish
-		except:
-			pass
-		# Unidades Vendidas / Estado
-		try:
-			subtext_status = product_soup_details.find("span", "ui-pdp-subtitle").string.split("|")
-			status = subtext_status[0].strip()
-			if len(subtext_status) == 2:
-				count_selled = subtext_status[1].replace("vendido", "").replace("s", "").strip()
-			else:
-				count_selled = "0"
-			product_dict["estado"] = status
-			product_dict["vendidos"] = count_selled
-		except:
-			pass
-                # Precio
-		try:
-			price = product_soup_details.find('span','price-tag-fraction').string.replace(".", "")
-			product_dict["precio"] = price
-		except:
-			logger_info.info("No se logro encontrar el precio, se dejara en -")
-			product_dict["precio"] = "-"
-		# Fin de registro
-		products.append(product_dict)
+		thread_scraping = threading.Thread(target=scraping_product_details, args=(product_soup,))
+		thread_list.append(thread_scraping)
+		thread_scraping.start()
+	for thread in thread_list:
+		thread.join()
 	try:
 		if i < count_pages - 1:
 			link_next = (soup.find('li','andes-pagination__button andes-pagination__button--next')).find('a','andes-pagination__link')
