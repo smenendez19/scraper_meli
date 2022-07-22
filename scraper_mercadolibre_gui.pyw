@@ -39,7 +39,7 @@ class scraping_ml_gui:
         self.root.resizable(0, 0)
         self.root.configure(background="black")
         self.root.iconphoto(True, tkinter.PhotoImage(file=os.path.join(os.path.dirname(sys.argv[0]), "static", "icon.png")))
-
+        
         ### Frames
         self.top_frame = tkinter.Frame(self.root, bg="black", width=300, height=300)
         self.form_frame = tkinter.Frame(self.root, bg="black", width=300, height=300)
@@ -356,9 +356,8 @@ class scraping_ml_gui:
             # Reviews
             try:
                 reviews = product_soup_details.find('span','ui-pdp-review__amount').string
-                reviews = reviews.split(" ")[0]
-                if reviews == "":
-                    reviews = "0"
+                reviews = reviews.replace("(", "")
+                reviews = reviews.replace(")", "")
                 product_dict["reviews"] = reviews
             except:
                 logger_info.info(f"No se encontraron reviews para {url_product}, se dejara en 0")
@@ -366,6 +365,8 @@ class scraping_ml_gui:
             # Id Publicacion
             try:
                 id_publish = product_soup_details.findAll('span','ui-pdp-color--BLACK ui-pdp-family--SEMIBOLD')[-1].string
+                id_publish = id_publish.replace("#", "")
+                id_publish = id_publish.strip()
                 product_dict["id_publicacion"] = id_publish
             except:
                 logger_info.info(f"No se logro encontrar ID de publicacion para {url_product}, se dejara en NULL")
@@ -384,7 +385,7 @@ class scraping_ml_gui:
                 pass
             # Precio
             try:
-                price = product_soup_details.find('span','price-tag-fraction').string.replace(".", "")
+                price = product_soup_details.find('span','andes-money-amount__fraction').string.replace(".", "")
                 product_dict["precio"] = price
             except:
                 logger_info.info(f"No se logro encontrar el precio para {url_product}, se dejara en 0")

@@ -60,15 +60,16 @@ def scraping_product_details(product_soup):
 	# Reviews
 	try:
 		reviews = product_soup_details.find('span','ui-pdp-review__amount').string
-		reviews = reviews.split(" ")[0]
-		if reviews == "":
-			reviews = "0"
+		reviews = reviews.replace("(", "")
+		reviews = reviews.replace(")", "")
 		product_dict["reviews"] = reviews
 	except:
 		product_dict["reviews"] = "0"
 	# Id Publicacion
 	try:
 		id_publish = product_soup_details.findAll('span','ui-pdp-color--BLACK ui-pdp-family--SEMIBOLD')[-1].string
+		id_publish = id_publish.replace("#", "")
+		id_publish = id_publish.strip()
 		product_dict["id_publicacion"] = id_publish
 	except:
 		pass
@@ -86,7 +87,7 @@ def scraping_product_details(product_soup):
 		pass
 	# Precio
 	try:
-		price = product_soup_details.find('span','price-tag-fraction').string.replace(".", "")
+		price = product_soup_details.find('span','andes-money-amount__fraction').string.replace(".", "")
 		product_dict["precio"] = price
 	except:
 		logger_info.info("No se logro encontrar el precio, se dejara en -")
